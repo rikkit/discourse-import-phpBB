@@ -2,9 +2,10 @@
 #### Configuration
 ############################################################
 
-# Get this token here: https://developers.facebook.com/tools/explorer
-# Select user_groups and read_stream as permission
-facebook_token: FACEBOOK_TOKEN
+# database stuff
+mysql_
+mysql_user: phpbb
+mysql_password: replaceme
 
 # The group you want to export posts from. Need to be a member of this group.
 facebook_group_name: Some Facebook Group Name
