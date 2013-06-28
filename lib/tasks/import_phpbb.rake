@@ -37,16 +37,13 @@
 #### The Rake Task
 ############################################################
 
-require 'koala'
+require 'mysql'
 
-desc "Import posts and comments from a Facebook group"
-task "import:facebook_group" => :environment do
+desc "Import posts and comments from a phpBB Forum"
+task "import:phpbb" => :environment do
   # Import configuration file
-  @config = YAML.load_file('config/import_facebook.yml')
+  @config = YAML.load_file('config/import_phpbb.yml')
   TEST_MODE = @config['test_mode']
-  FB_TOKEN = @config['facebook_token']
-  FB_GROUP_NAME = @config['facebook_group_name']
-  DC_CATEGORY_NAME = @config['discourse_category_name']
   DC_ADMIN = @config['discourse_admin']
   REAL_EMAIL = @config['real_email_addresses']
 
@@ -61,19 +58,16 @@ task "import:facebook_group" => :environment do
   end
 
   # Setup Facebook connection
-  fb_initialize_connection(FB_TOKEN)
+  sql_connect
 
-  # Collect IDs
-  group_id = fb_get_group_id(FB_GROUP_NAME)
-
-  # Fetch all facebook posts
-  fb_fetch_posts(group_id, current_unix_time)
+  sql_fetch_users
+  sql_fetch_posts
 
   if TEST_MODE then
     exit_script # We're done
   else
     # Create users in Discourse
-    dc_create_users_from_fb_writers
+    dc_create_users_from_phpbb_users
 
     # Backup Site Settings
     dc_backup_site_settings
@@ -100,81 +94,68 @@ end
 #### Methods
 ############################################################
 
-# Returns the Facebook Group ID of the given group name
-# User must be a member of given group
-def fb_get_group_id(groupname)
-  groups = @graph.get_connections("me", "groups")
-  groups = groups.select {|g| g['name'] == groupname}
-  groups[0]['id']
-end
-
-# Connect to the Facebook Graph API
-def fb_initialize_connection(token)
+def sql_connect(token)
   begin
-    @graph = Koala::Facebook::API.new(token)
-    test = @graph.get_object('me')
-  rescue Koala::Facebook::APIError => e
-    puts "\nERROR: Connection with Facebook failed\n#{e.message}".red
+    @sql = Mysql.new(@config['sql_server'], @config['sql_user'],
+      @config['sql_password'], @config['sql_database'])
+  rescue Mysql::Error => e
+    puts "\nERROR: Connection to Database failed\n#{e.message}".red
     exit_script
   end
 
-  puts "\nFacebook token accepted".green
+  puts "\nConnected to SQL DB".green
 end
 
-def fb_fetch_posts(group_id, until_time)
-  @fb_posts ||= [] # Initialize if needed
-
+def sql_fetch_posts
+  @posts ||= [] # Initialize if needed
+  offset = 0
   time_of_last_imported_post = until_time
 
   # Fetch Facebook posts in batches and download writer/user info
   loop do
-    query = "SELECT created_time,
-                    updated_time,
-                    post_id,
-                    actor_id,
-                    permalink,
-                    message,
-                    comments
-             FROM stream
-             WHERE source_id = '#{group_id}'
-               AND created_time < #{time_of_last_imported_post}
-             LIMIT 500"
-    result = @graph.fql_query(query)
+    query = "SELECT t.topic_id, t.topic_title,
+      u.username, u.user_id,
+      p.post_time, p.post_id,
+      p.post_text
+      FROM phpbb_posts p
+      JOIN phpbb_topics t ON t.topic_id=p.topic_id
+      JOIN phpbb_users u ON u.user_id=p.poster_id
+      ORDER BY topic_id ASC, topic_title ASC, post_id ASC
+      LIMIT #{offset},500;"
+    result = @sql.query(query)
 
     break if result.count == 0 # No more posts to import
 
     # Add the results of this batch to the rest of the imported posts
-    @fb_posts = @fb_posts.concat(result)
+    @posts << result
 
-    puts "Batch: #{result.count.to_s} posts (since #{unix_to_human_time(result[-1]['created_time'])} until #{unix_to_human_time(result[0]['created_time'])})"
-    time_of_last_imported_post = result[-1]['created_time']
+    puts "Batch: #{result.count.to_s} posts (since "+
+      "#{unix_to_human_time(result[-1]['post_time'])} until "+
+      "#{unix_to_human_time(result[0]['post_time'])})"
+    time_of_last_imported_post = result[-1]['post_time']
+
+    offset += result.count
 
     result.each do |post|
-      fb_extract_writer(post) # Extract the writer from the post
-      comments = post['comments']['comment_list']
-      if comments.count > 0 then
-        comments.each do |comment|
-          fb_extract_writer(comment)
-        end
-      end
+      sql_fetch_user(post) # Extract the poster from the post
     end
   end
 
-  puts "\nAmount of posts: #{@fb_posts.count.to_s}"
-  puts "Amount of writers: #{@fb_writers.count.to_s}"
+  puts "\nAmount of posts: #{@posts.count.to_s}"
+  puts "Amount of users: #{@phpbb_users.count.to_s}"
 end
 
-# Import Facebook posts into Discourse
-def fb_import_posts_into_dc(dc_category)
+def sql_import_posts(dc_category)
+  #TODO
   post_count = 0
   @fb_posts.each do |fb_post|
     post_count += 1
 
     # Get details of the writer of this post
-    fb_post_user = @fb_writers.find {|k| k['id'] == fb_post['actor_id'].to_s}
+    fb_post_user = @phpbb_users.find {|k| k['id'] == fb_post['actor_id'].to_s}
 
     # Get the Discourse user of this writer
-    dc_user = dc_get_user(fb_username_to_dc(fb_post_user['username']))
+    dc_user = dc_get_user(phpbb_username_to_dc(fb_post_user['username']))
 
     # Facebook posts don't have a title, so use first 50 characters of the post as title
     topic_title = fb_post['message'][0,50]
@@ -211,10 +192,10 @@ def fb_import_posts_into_dc(dc_category)
       unless fb_post['comments']['count'] == 0 then
         fb_post['comments']['comment_list'].each do |comment|
           # Get details of the writer of this comment
-          comment_user = @fb_writers.find {|k| k['id'] == comment['fromid'].to_s}
+          comment_user = @phpbb_users.find {|k| k['id'] == comment['fromid'].to_s}
 
           # Get the Discourse user of this writer
-          dc_user = dc_get_user(fb_username_to_dc(comment_user['username']))
+          dc_user = dc_get_user(phpbb_username_to_dc(comment_user['username']))
 
           post_creator = PostCreator.new(dc_user,
                                          raw: comment['text'],
@@ -256,10 +237,11 @@ def dc_get_or_create_category(name, owner)
 end
 
 # Create a Discourse user with Facebook info unless it already exists
-def dc_create_users_from_fb_writers
-  @fb_writers.each do |fb_writer|
+def dc_create_users_from_phpbb_users
+  #TODO
+  @phpbb_users.each do |fb_writer|
     # Setup Discourse username
-    dc_username = fb_username_to_dc(fb_writer['username'])
+    dc_username = phpbb_username_to_dc(fb_writer['username'])
 
     # Create email address for user
     if fb_writer['email'].nil? then
@@ -354,25 +336,24 @@ def exit_script
   exit
 end
 
-def fb_extract_writer(post)
-  @fb_writers ||= [] # Initialize if needed
+def sql_fetch_users(post)
+  @phpbb_users ||= [] # Initialize if needed
 
-  if post.has_key? 'actor_id' # Facebook post
-    writer = post['actor_id']
-  else # Facebook comment
-    writer = post['fromid']
-  end
-
-  # Fetch user info from Facebook and add to writers array
-  unless @fb_writers.any? {|w| w['id'] == writer.to_s}
-    @fb_writers << @graph.get_object(writer)
+  offset = 0
+  loop do
+    users = @sql.query "SELECT * 
+      FROM `phpbb_users` 
+      ORDER BY `user_id` ASC
+      LIMIT #{offset}, 50;"
+    break if users.count == 0
+    @phpbb_users << users
+    offset += users.count
   end
 end
 
-def fb_username_to_dc(name)
+def phpbb_username_to_dc(name)
   # Create username from full name, only letters and numbers
   username = name.tr('^A-Za-z0-9', '').downcase
-
   # Maximum length of a Discourse username is 15 characters
   username = username[0,15]
 end

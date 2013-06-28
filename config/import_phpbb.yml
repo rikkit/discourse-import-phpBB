@@ -3,21 +3,16 @@
 ############################################################
 
 # database stuff
-mysql_
-mysql_user: phpbb
-mysql_password: replaceme
-
-# The group you want to export posts from. Need to be a member of this group.
-facebook_group_name: Some Facebook Group Name
-
-# The category for the topics, will be created if needed
-discourse_category_name: Some Category Name
+sql_server: localhost
+sql_user: phpbb
+sql_database: nerdtalk
+sql_password: replaceme
 
 # User with admin privileges to create users and category
-discourse_admin: Admin Username
+discourse_admin: forumadmin
 
 # If true then nothing will be written to the Discourse database
 test_mode: false
 
 # User real email addesses? If not, .fake will be added to the username
-real_email_addresses: false
+real_email_addresses: true

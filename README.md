@@ -10,7 +10,7 @@ Use at your own risk! Please test on a dummy Discourse install first.
 
 # Instructions
 
-* Gemfile: add mysql
+* Gemfile: add mysql2
 * Edit `config/import_phpbb.yml`
 * Place `config/import_phpbb.yml` in your `config` folder
 * Place `lib/tasks/import_phpbb.rake` in your `lib/tasks` folder
