@@ -151,7 +151,7 @@ def sql_fetch_users
       WHERE g.group_name != 'BOTS'
       ORDER BY u.user_id ASC
       LIMIT #{offset}, 50;"
-    puts query.yellow
+    puts query.yellow if offset == 0
     users = @sql.query query
     users.each do |user|
       @phpbb_users << user
@@ -223,8 +223,6 @@ def sql_import_posts
     end
     post = post_creator.create
     
-    
-    
     # Everything set, save the topic
     unless post_creator.errors.present? then
       post_serializer = PostSerializer.new(post, scope: true, root: false)
@@ -232,9 +230,9 @@ def sql_import_posts
       post_serializer.draft_sequence = DraftSequence.current(dc_user, post.topic.draft_key)
       #save id to hash
       topics[phpbb_post['topic_id']] = post.topic.id if newtopic
-      puts "Topic #{phpbb_post['post_id']} created".green if newtopic
+      puts "\nTopic #{phpbb_post['post_id']} created".green if newtopic
     else # Skip if not valid for some reason
-      puts "Contents of topic from post #{phpbb_post['post_id']} failed to ".red+
+      puts "\nContents of topic from post #{phpbb_post['post_id']} failed to ".red+
         "import: #{post_creator.errors.full_messages}".red
     end
   end
@@ -301,56 +299,85 @@ def sanitize_text(text)
     text = "<capslock> " + text.downcase
   end
   
+  if not seems_pronounceable?(text)
+    text = "<symbols>\n" + text
+  end
+  
   #image tags
-  text.gsub! /\[(img:[a-z0-9]+)\](.*?)\[\/\1\]/, ' \2 '
+  text.gsub! /\[(img:[a-z0-9]+)\](.*?)\[\/\1\]/, '![image](\2)'
   
   text
 end
 
+
+### Methods stolen from lib/text_sentinel.rb
 def seems_quiet?(text)
   # We don't allow all upper case content in english
   not((text =~ /[A-Z]+/) && !(text =~ /[^[:ascii:]]/) && (text == text.upcase))
 end
+def seems_pronounceable?(text)
+  # At least some non-symbol characters
+  # (We don't have a comprehensive list of symbols, but this will eliminate some noise)
+  text.gsub(symbols_regex, '').size > 0
+end
+def symbols_regex
+  /[\ -\/\[-\`\:-\@\{-\~]/m
+end
+###
 
 # Backup site settings
 def dc_backup_site_settings
-  @site_settings = {}
-  @site_settings['unique_posts_mins'] = SiteSetting.unique_posts_mins
-  @site_settings['rate_limit_create_topic'] = SiteSetting.rate_limit_create_topic
-  @site_settings['rate_limit_create_post'] = SiteSetting.rate_limit_create_post
-  @site_settings['max_topics_per_day'] = SiteSetting.max_topics_per_day
-  @site_settings['title_min_entropy'] = SiteSetting.title_min_entropy
-  @site_settings['body_min_entropy'] = SiteSetting.body_min_entropy
-    
-  @site_settings['min_post_length'] = SiteSetting.min_post_length
-  @site_settings['newuser_spam_host_threshold'] = SiteSetting.newuser_spam_host_threshold
-  @site_settings['min_topic_title_length'] = SiteSetting.min_topic_title_length
-  @site_settings['newuser_max_links'] = SiteSetting.newuser_max_links
-  @site_settings['newuser_max_images'] = SiteSetting.newuser_max_images
-  @site_settings['max_word_length'] = SiteSetting.max_word_length
+  s = {}
+  Discourse::Application.configure do
+    s['mailer'] = config.action_mailer.perform_deliveries
+  end
+  
+  s['unique_posts_mins'] = SiteSetting.unique_posts_mins
+  s['rate_limit_create_topic'] = SiteSetting.rate_limit_create_topic
+  s['rate_limit_create_post'] = SiteSetting.rate_limit_create_post
+  s['max_topics_per_day'] = SiteSetting.max_topics_per_day
+  s['title_min_entropy'] = SiteSetting.title_min_entropy
+  s['body_min_entropy'] = SiteSetting.body_min_entropy
+  
+  s['min_post_length'] = SiteSetting.min_post_length
+  s['newuser_spam_host_threshold'] = SiteSetting.newuser_spam_host_threshold
+  s['min_topic_title_length'] = SiteSetting.min_topic_title_length
+  s['newuser_max_links'] = SiteSetting.newuser_max_links
+  s['newuser_max_images'] = SiteSetting.newuser_max_images
+  s['max_word_length'] = SiteSetting.max_word_length
   #@site_settings['abc'] = SiteSetting.abc
+  
+  @site_settings = s
 end
 
 # Restore site settings
 def dc_restore_site_settings
-  SiteSetting.send("unique_posts_mins=", @site_settings['unique_posts_mins'])
-  SiteSetting.send("rate_limit_create_topic=", @site_settings['rate_limit_create_topic'])
-  SiteSetting.send("rate_limit_create_post=", @site_settings['rate_limit_create_post'])
-  SiteSetting.send("max_topics_per_day=", @site_settings['max_topics_per_day'])
-  SiteSetting.send("title_min_entropy=", @site_settings['title_min_entropy'])
-  SiteSetting.send("body_min_entropy=", @site_settings['body_min_entropy'])
+  s = @site_settings
+  Discourse::Application.configure do
+    config.action_mailer.perform_deliveries = s['mailer']
+  end
+  SiteSetting.send("unique_posts_mins=", s['unique_posts_mins'])
+  SiteSetting.send("rate_limit_create_topic=", s['rate_limit_create_topic'])
+  SiteSetting.send("rate_limit_create_post=", s['rate_limit_create_post'])
+  SiteSetting.send("max_topics_per_day=", s['max_topics_per_day'])
+  SiteSetting.send("title_min_entropy=", s['title_min_entropy'])
+  SiteSetting.send("body_min_entropy=", s['body_min_entropy'])
     
-  SiteSetting.send("min_post_length=", @site_settings['min_post_length'])
-  SiteSetting.send("newuser_spam_host_threshold=", @site_settings['newuser_spam_host_threshold'])
-  SiteSetting.send("min_topic_title_length=", @site_settings['min_topic_title_length'])
-  SiteSetting.send("newuser_max_links=", @site_settings['newuser_max_links'])
-  SiteSetting.send("newuser_max_images=", @site_settings['newuser_max_images'])
-  SiteSetting.send("max_word_length=", @site_settings['max_word_length'])
+  SiteSetting.send("min_post_length=", s['min_post_length'])
+  SiteSetting.send("newuser_spam_host_threshold=", s['newuser_spam_host_threshold'])
+  SiteSetting.send("min_topic_title_length=", s['min_topic_title_length'])
+  SiteSetting.send("newuser_max_links=", s['newuser_max_links'])
+  SiteSetting.send("newuser_max_images=", s['newuser_max_images'])
+  SiteSetting.send("max_word_length=", s['max_word_length'])
   #SiteSetting.send("abc=", @site_settings['abc'])
 end
 
 # Set temporary site settings needed for this rake task
 def dc_set_temporary_site_settings
+  Discourse::Application.configure do
+    config.action_mailer.perform_deliveries = false
+  end
+  
   SiteSetting.send("unique_posts_mins=", 0)
   SiteSetting.send("rate_limit_create_topic=", 0)
   SiteSetting.send("rate_limit_create_post=", 0)
