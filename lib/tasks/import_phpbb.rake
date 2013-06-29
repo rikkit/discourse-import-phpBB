@@ -297,6 +297,8 @@ def dc_create_users_from_phpbb_users
 end
 
 def sanitize_text(text)
+  text = CGI.unescapeHTML(text)
+  
   # screaming
   if not seems_quiet?(text)
     text = "<capslock> " + text.downcase
@@ -321,30 +323,32 @@ def sanitize_text(text)
   text.gsub! /([^\n])\n/, '\1  '+"\n"
   
   # bold text
-  text.gsub! /\[(b:[a-z0-9]+)\](.*?)\[\/\1\]/, '**\2**'
+  text.gsub! /\[(b:[a-z0-9]+)\](.*?)\[\/\1\]/m, '**\2**'
   
   # italic text
-  text.gsub! /\[(i:[a-z0-9]+)\](.*?)\[\/\1\]/, '*\2*'
+  text.gsub! /\[(i:[a-z0-9]+)\](.*?)\[\/\1\]/m, '*\2*'
     
   # quotes
   # [quote=&quot;cfstras&quot;:uujr5ltn]TEXT[/quote:uujr5ltn]
-  text.gsub! /\[quote=("|&quot;)([A-Za-z0-9]+)("|&quot;):([a-z0-9]+)\](.*?)\[\/quote:\4\]/,
-    '[quote="\2"]' + "\n" + '\5' + "\n" + '[/quote]'
+  newtext = text
+  begin
+    text = newtext
+    newtext = text.sub /\[quote="(.*?)":([a-z0-9]+)\](.*?)\[\/quote:\2\]/m,
+      '[quote="\1"]' + "\n" + '\3' + "\n" + '[/quote]'
+  end until newtext == text
   
   # strange links (maybe soundcloud)
   # <!-- m --><a class="postlink" href="http://link">http://link</a><!-- m -->
   text.gsub! /<!-- m --><a class="postlink" href="(.*?)">.*?<\/a><!-- m -->/, ' \1 '
   
   # code blocks
-  text.gsub! /\[(code:[a-z0-9]+)\](.*?)\[\/\1\]/ do |match|
-    match.gsub! /\[(code:[a-z0-9]+)\](.*?)\[\/\1\]/, '\2'
-    match.gsub! /\n/, '\n    '
-    match.gsub! /^/, '    '
+  text.gsub! /\[(code:[a-z0-9]+)\](.*?)\[\/\1\]/m do |match|
+    $2.gsub(/(  )?\n(.)/, "\n"+'    \2').gsub(/^/, '    ').gsub(/$/, "\n")
   end
   
   # remove size tags
   # [size=85:az5et819]dump dump[/size:az5et819]
-  text.gsub! /\[size=\d+:([a-z0-9]+)\](.*?)\[\/size:\1\]/, '\2'
+  text.gsub! /\[size=\d+:([a-z0-9]+)\](.*?)\[\/size:\1\]/m, '\2'
   
   text
 end
@@ -434,7 +438,7 @@ def dc_set_temporary_site_settings
   
   SiteSetting.send("min_post_length=", 1) # never set this to 0
   SiteSetting.send("newuser_spam_host_threshold=", 1000)
-  SiteSetting.send("min_topic_title_length=", 1)
+  SiteSetting.send("min_topic_title_length=", 2)
   SiteSetting.send("newuser_max_links=", 1000)
   SiteSetting.send("newuser_max_images=", 1000)
   SiteSetting.send("max_word_length=", 5000)
