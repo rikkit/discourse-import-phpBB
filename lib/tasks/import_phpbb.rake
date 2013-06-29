@@ -307,14 +307,18 @@ def sanitize_text(text)
   end
   
   #image tags
-  text.gsub! /\[(img:[a-z0-9]+)\](.*?)\[\/\1\]/, '![image](\2)'
+  text.gsub! /\[(img:[a-z0-9]+)\](.*?)\[\/\1\]/, ' ![image](\2)'
   
-  #youtube
-  text.gsub! /\[(youtube:[a-z0-9]+)\](.*?)\[\/\1\]/, ' \2 '
+  # youtube, soundcloud or urls
   # [youtube:2hehxrka]http://www.youtube.com/watch?v=q0YS0cBJzyA[/youtube:2hehxrka]
+  text.gsub! /\[((youtube|soundcloud|url):[a-z0-9]+)\](.*?)\[\/\1\]/, ' \3 '
+  
+  # url tags with description
+  # [url=https://link:27l5zntr]source[/url:27l5zntr]
+  text.gsub! /\[url=(.*?):([a-z0-9]+)\](.*?)\[\/url:\2\]/, ' [\3](\1) '
   
   # newlines
-  text.gsub! /\n([^\n])/, "  \n\1"
+  text.gsub! /([^\n])\n/, '\1  '+"\n"
   
   # bold text
   text.gsub! /\[(b:[a-z0-9]+)\](.*?)\[\/\1\]/, '**\2**'
@@ -323,9 +327,24 @@ def sanitize_text(text)
   text.gsub! /\[(i:[a-z0-9]+)\](.*?)\[\/\1\]/, '*\2*'
     
   # quotes
-  # [quote="username":380gu4km]text[/quote:380gu4km]
-  text.gsub! /\[quote="([A-Za-z0-9]+)":([a-z0-9]+)\](.*?)\[\/quote:\2\]/,
-    "[quote=\"\1\"]\n\3[\/quote]"
+  # [quote=&quot;cfstras&quot;:uujr5ltn]TEXT[/quote:uujr5ltn]
+  text.gsub! /\[quote=("|&quot;)([A-Za-z0-9]+)("|&quot;):([a-z0-9]+)\](.*?)\[\/quote:\4\]/,
+    '[quote="\2"]' + "\n" + '\5' + "\n" + '[/quote]'
+  
+  # strange links (maybe soundcloud)
+  # <!-- m --><a class="postlink" href="http://link">http://link</a><!-- m -->
+  text.gsub! /<!-- m --><a class="postlink" href="(.*?)">.*?<\/a><!-- m -->/, ' \1 '
+  
+  # code blocks
+  text.gsub! /\[(code:[a-z0-9]+)\](.*?)\[\/\1\]/ do |match|
+    match.gsub! /\[(code:[a-z0-9]+)\](.*?)\[\/\1\]/, '\2'
+    match.gsub! /\n/, '\n    '
+    match.gsub! /^/, '    '
+  end
+  
+  # remove size tags
+  # [size=85:az5et819]dump dump[/size:az5et819]
+  text.gsub! /\[size=\d+:([a-z0-9]+)\](.*?)\[\/size:\1\]/, '\2'
   
   text
 end
