@@ -5,14 +5,12 @@
 # database stuff
 sql_server: localhost
 sql_user: phpbb
-sql_database: nerdtalk
+sql_database: phpbb
 sql_password: replaceme
 
 # User with admin privileges to create users and category
 discourse_admin: forumadmin
 
 # If true then nothing will be written to the Discourse database
-test_mode: false
+test_mode: true
 
-# User real email addesses? If not, .fake will be added to the username
-real_email_addresses: true

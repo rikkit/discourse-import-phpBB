@@ -10,12 +10,15 @@ Use at your own risk! Please test on a dummy Discourse install first.
 
 # Instructions
 
-* Gemfile: add mysql2
+* Gemfile: add entry
+  `gem 'mysql2', require: false`
+* Install dev files for mysql, ex. Debian: `sudo apt-get install libmysqlclient-dev`
+* Install gem: `gem install mysql2`
 * Edit `config/import_phpbb.yml`
 * Place `config/import_phpbb.yml` in your `config` folder
 * Place `lib/tasks/import_phpbb.rake` in your `lib/tasks` folder
 * In case of multisite prepend next command with: `export RAILS_DB=<your database>`
-* Run `rake import:import_phpbb`
+* Run `rake import:phpbb`
 
 # Todo
 

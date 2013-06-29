@@ -1,9 +1,10 @@
 ############################################################
-#### IMPORT FACEBOOK GROUP INTO DISCOURSE
+#### IMPORT phpBB to Discourse
 ####
-#### created by Sander Datema (info@sanderdatema.nl)
+#### originally created for facebook by Sander Datema (info@sanderdatema.nl)
+#### forked by Claus F. Strasburger ( http://about.me/cfstras )
 ####
-#### version 1.6 (15/05/2013)
+#### version 0.1
 ############################################################
 
 ############################################################
@@ -11,80 +12,72 @@
 ############################################################
 #
 # This rake task will import all posts and comments of a
-# Facebook group into Discourse.
+# phpBB Forum into Discourse.
 #
-# - It will preserve post and comment dates
-# - It will not import likes
-# - It will create new user accounts for each imported user
-#   using username@localhost as email address and the full
-#   name of each user converted to lower case, no spaces as
-#   username
-# - It will use the first 50 characters of the post as title
-#   for the topic
-
 ############################################################
 #### Prerequisits
 ############################################################
 #
-# - A Facebook Graph API token. get it here:
-#   https://developers.facebook.com/tools/explorer
-#   Select user_groups and read_stream as permission
 # - Add this to your Gemfile:
-#   gem 'koala', require: false
-# - Edit the configuration file config/import_facebook.yml
+#   gem 'mysql2', require: false
+# - Edit the configuration file config/import_phpbb.yml
 
 ############################################################
 #### The Rake Task
 ############################################################
 
-require 'mysql'
+require 'mysql2'
 
 desc "Import posts and comments from a phpBB Forum"
-task "import:phpbb" => :environment do
+task "import:phpbb" => 'environment' do
   # Import configuration file
   @config = YAML.load_file('config/import_phpbb.yml')
   TEST_MODE = @config['test_mode']
   DC_ADMIN = @config['discourse_admin']
-  REAL_EMAIL = @config['real_email_addresses']
 
   if TEST_MODE then puts "\n*** Running in TEST mode. No changes to Discourse database are made\n".yellow end
-  unless REAL_EMAIL then puts "\n*** Using fake email addresses\n".yellow end
 
   # Some checks
   # Exit rake task if admin user doesn't exist
-  unless dc_user_exists(DC_ADMIN) then
-    puts "\nERROR: The admin user #{DC_ADMIN} does not exist".red
-    exit_script
+  DC_ADMIN = Discourse.system_user
+  #unless dc_user_exists(DC_ADMIN) then
+  #  puts "\nERROR: The admin user #{DC_ADMIN} does not exist".red
+  #  exit_script
+  #end
+
+  begin
+    sql_connect
+
+    sql_fetch_users
+    sql_fetch_posts
+
+    if TEST_MODE then
+      require 'irb'
+      ARGV.clear
+      IRB.start
+      exit_script # We're done
+    else
+      # Create users in Discourse
+      dc_create_users_from_phpbb_users
+
+      # Backup Site Settings
+      dc_backup_site_settings
+
+      # Then set the temporary Site Settings we need
+      dc_set_temporary_site_settings
+
+      # Create and/or set Discourse category
+      dc_category = dc_get_or_create_category(DC_CATEGORY_NAME, DC_ADMIN)
+
+      # Import Facebooks posts into Discourse
+      fb_import_posts_into_dc(dc_category)
+
+      # Restore Site Settings
+      dc_restore_site_settings
+    end
+  ensure
+    @sql.close if @sql
   end
-
-  # Setup Facebook connection
-  sql_connect
-
-  sql_fetch_users
-  sql_fetch_posts
-
-  if TEST_MODE then
-    exit_script # We're done
-  else
-    # Create users in Discourse
-    dc_create_users_from_phpbb_users
-
-    # Backup Site Settings
-    dc_backup_site_settings
-
-    # Then set the temporary Site Settings we need
-    dc_set_temporary_site_settings
-
-    # Create and/or set Discourse category
-    dc_category = dc_get_or_create_category(DC_CATEGORY_NAME, DC_ADMIN)
-
-    # Import Facebooks posts into Discourse
-    fb_import_posts_into_dc(dc_category)
-
-    # Restore Site Settings
-    dc_restore_site_settings
-  end
-
   puts "\n*** DONE".green
   # DONE!
 end
@@ -94,11 +87,12 @@ end
 #### Methods
 ############################################################
 
-def sql_connect(token)
+def sql_connect
   begin
-    @sql = Mysql.new(@config['sql_server'], @config['sql_user'],
-      @config['sql_password'], @config['sql_database'])
-  rescue Mysql::Error => e
+    Mysql2::Client.new(:host => "localhost", :username => "root")
+    @sql = Mysql2::Client.new(:host => @config['sql_server'], :username => @config['sql_user'],
+      :password => @config['sql_password'], :database => @config['sql_database'])
+  rescue Mysql2::Error => e
     puts "\nERROR: Connection to Database failed\n#{e.message}".red
     exit_script
   end
@@ -107,7 +101,7 @@ def sql_connect(token)
 end
 
 def sql_fetch_posts
-  @posts ||= [] # Initialize if needed
+  @phpbb_posts ||= [] # Initialize if needed
   offset = 0
   time_of_last_imported_post = until_time
 
@@ -115,11 +109,14 @@ def sql_fetch_posts
   loop do
     query = "SELECT t.topic_id, t.topic_title,
       u.username, u.user_id,
-      p.post_time, p.post_id,
+      f.forum_name,
+      p.post_time, p.post_edit_time,
+      p.post_id,
       p.post_text
       FROM phpbb_posts p
       JOIN phpbb_topics t ON t.topic_id=p.topic_id
       JOIN phpbb_users u ON u.user_id=p.poster_id
+      JOIN phpbb_forums f ON t.forum_id=f.forum_id
       ORDER BY topic_id ASC, topic_title ASC, post_id ASC
       LIMIT #{offset},500;"
     result = @sql.query(query)
@@ -127,7 +124,7 @@ def sql_fetch_posts
     break if result.count == 0 # No more posts to import
 
     # Add the results of this batch to the rest of the imported posts
-    @posts << result
+    @phpbb_posts << result
 
     puts "Batch: #{result.count.to_s} posts (since "+
       "#{unix_to_human_time(result[-1]['post_time'])} until "+
@@ -141,43 +138,57 @@ def sql_fetch_posts
     end
   end
 
-  puts "\nAmount of posts: #{@posts.count.to_s}"
+  puts "\nAmount of posts: #{@phpbb_posts.count.to_s}"
+end
+
+def sql_fetch_users(post)
+  @phpbb_users ||= [] # Initialize if needed
+
+  offset = 0
+  loop do
+    users = @sql.query "SELECT * 
+      FROM `phpbb_users` 
+      ORDER BY `user_id` ASC
+      LIMIT #{offset}, 50;"
+    break if users.count == 0
+    @phpbb_users << users
+    offset += users.count
+  end
   puts "Amount of users: #{@phpbb_users.count.to_s}"
 end
 
 def sql_import_posts(dc_category)
   #TODO
   post_count = 0
-  @fb_posts.each do |fb_post|
+  @phpbb_posts.each do |phpbb_post|
     post_count += 1
 
     # Get details of the writer of this post
-    fb_post_user = @phpbb_users.find {|k| k['id'] == fb_post['actor_id'].to_s}
+    user = @phpbb_users.find {|k| k['user_id'] == phpbb_post['user_id'].to_s}
 
     # Get the Discourse user of this writer
-    dc_user = dc_get_user(phpbb_username_to_dc(fb_post_user['username']))
-
-    # Facebook posts don't have a title, so use first 50 characters of the post as title
-    topic_title = fb_post['message'][0,50]
+    dc_user = dc_get_user(phpbb_username_to_dc(user['username_clean']))
+    category = dc_get_or_create_category(
+      phpbb_post['forum_name'].gsub(' ','-').downcase, DC_ADMIN)
+    topic_title = phpbb_post['topic_title']
     # Remove new lines and replace with a space
-    topic_title = topic_title.gsub( /\n/m, " " )
+    # topic_title = topic_title.gsub( /\n/m, " " )
 
-    # Set topic create and update time
-    #dc_topic.created_at = Time.at(fb_post['created_time'])
-    #dc_topic.updated_at = dc_topic.created_at
-
-    progress = post_count.percent_of(@fb_posts.count).round.to_s
+    # some progress
+    progress = post_count.percent_of(@phpbb_posts.count).round.to_s
     puts "[#{progress}%]".blue + " Creating topic '" + topic_title.blue #+ "' (#{topic_created_at})"
 
+    # create!
     post_creator = PostCreator.new(dc_user,
-                                   raw: fb_post['message'],
+                                   raw: phpbb_post['post_text'],
                                    title: topic_title,
+                                   topic_id: phpbb_post['topic_id'],
                                    archetype: 'regular',
-                                   category: DC_CATEGORY_NAME,
-                                   created_at: Time.at(fb_post['created_time']),
-                                   updated_at: Time.at(fb_post['created_time']))
+                                   category: category,
+                                   created_at: Time.at(phpbb_post['post_time']),
+                                   updated_at: Time.at(phpbb_post['post_edit_time']))
     post = post_creator.create
-
+    
     topic_id = post.topic.id
 
     # Everything set, save the topic
@@ -186,48 +197,18 @@ def sql_import_posts(dc_category)
       post_serializer.topic_slug = post.topic.slug if post.topic.present?
       post_serializer.draft_sequence = DraftSequence.current(dc_user, post.topic.draft_key)
 
-      puts " - First post of topic created".green
-
-      # Now create the replies, using the Facebook comments
-      unless fb_post['comments']['count'] == 0 then
-        fb_post['comments']['comment_list'].each do |comment|
-          # Get details of the writer of this comment
-          comment_user = @phpbb_users.find {|k| k['id'] == comment['fromid'].to_s}
-
-          # Get the Discourse user of this writer
-          dc_user = dc_get_user(phpbb_username_to_dc(comment_user['username']))
-
-          post_creator = PostCreator.new(dc_user,
-                                         raw: comment['text'],
-                                         topic_id: topic_id,
-                                         created_at: Time.at(comment['time']),
-                                         updated_at: Time.at(comment['time']))
-
-          post = post_creator.create
-
-          # dc_post.created_at = Time.at(comment['time'])
-          # dc_post.updated_at = dc_post.created_at
-
-          unless post_creator.errors.present? then
-            post_serializer = PostSerializer.new(post, scope: true, root: false)
-            post_serializer.topic_slug = post.topic.slug if post.topic.present?
-            post_serializer.draft_sequence = DraftSequence.current(dc_user, post.topic.draft_key)
-          else # Skip if not valid for some reason
-            puts " - Comment (#{comment['id']}) failed to import, #{post_creator.errors.messages[:raw][0]}".red
-          end
-        end
-          puts " - #{fb_post['comments']['count'].to_s} Comments imported".green
-        end
+      puts " - Post #{phpbb_post['post_id']} created".green
     else # Skip if not valid for some reason
-      puts "Contents of topic from Facebook post #{fb_post['post_id']} failed to import, #{post_creator.errors.messages[:base]}".red
+      puts "Contents of topic from post #{phpbb_post['post_id']} failed to import, #{post_creator.errors.messages[:base]}".red
     end
   end
 end
 
+
 # Returns the Discourse category where imported Facebook posts will go
 def dc_get_or_create_category(name, owner)
   if Category.where('name = ?', name).empty? then
-    puts "Creating category '#{name}'"
+    puts "Creating category '#{name}'".yellow
     owner = User.where('username = ?', owner).first
     category = Category.create!(name: name, user_id: owner.id)
   else
@@ -239,38 +220,35 @@ end
 # Create a Discourse user with Facebook info unless it already exists
 def dc_create_users_from_phpbb_users
   #TODO
-  @phpbb_users.each do |fb_writer|
+  @phpbb_users.each do |phpbb_user|
     # Setup Discourse username
-    dc_username = phpbb_username_to_dc(fb_writer['username'])
+    dc_username = phpbb_username_to_dc(phpbb_user['username_clean'])
 
     # Create email address for user
-    if fb_writer['email'].nil? then
-      dc_email = dc_username + "@localhost.fake"
+    if phpbb_user['user_email'].nil? then
+      dc_email = dc_username + "@dc.q1cc.net"
     else
-      if REAL_EMAIL then
-        dc_email = fb_writer['email']
-      else
-        dc_email = fb_writer['email'] + '.fake'
-      end
+      dc_email = phpbb_user['user_email']
     end
 
     # Create user if it doesn't exist
     if User.where('username = ?', dc_username).empty? then
       dc_user = User.create!(username: dc_username,
-                             name: fb_writer['name'],
+                             name: phpbb_user['username'],
                              email: dc_email,
                              approved: true,
-                             approved_by_id: dc_get_user_id(DC_ADMIN))
+                             approved_by_id: DC_ADMIN.id)
 
+      #TODO: add CAS auth
       # Create Facebook credentials so the user could login later and claim his account
-      FacebookUserInfo.create!(user_id: dc_user.id,
-                               facebook_user_id: fb_writer['id'].to_i,
-                               username: fb_writer['username'],
-                               first_name: fb_writer['first_name'],
-                               last_name: fb_writer['last_name'],
-                               name: fb_writer['name'].tr(' ', '_'),
-                               link: fb_writer['link'])
-      puts "User #{fb_writer['name']} (#{dc_username} / #{dc_email}) created".green
+      # FacebookUserInfo.create!(user_id: dc_user.id,
+      #                         facebook_user_id: fb_writer['id'].to_i,
+      #                         username: fb_writer['username'],
+      #                         first_name: fb_writer['first_name'],
+      #                         last_name: fb_writer['last_name'],
+      #                         name: fb_writer['name'].tr(' ', '_'),
+      #                         link: fb_writer['link'])*/
+      puts "User #{phpbb_user['name']} (#{dc_username} / #{dc_email}) created".green
     end
   end
 end
@@ -334,21 +312,6 @@ end
 def exit_script
   puts "\nScript will now exit\n".yellow
   exit
-end
-
-def sql_fetch_users(post)
-  @phpbb_users ||= [] # Initialize if needed
-
-  offset = 0
-  loop do
-    users = @sql.query "SELECT * 
-      FROM `phpbb_users` 
-      ORDER BY `user_id` ASC
-      LIMIT #{offset}, 50;"
-    break if users.count == 0
-    @phpbb_users << users
-    offset += users.count
-  end
 end
 
 def phpbb_username_to_dc(name)
