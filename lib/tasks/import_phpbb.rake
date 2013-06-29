@@ -211,6 +211,9 @@ def sql_import_posts
         category: category.name,
         created_at: Time.at(phpbb_post['post_time']),
         updated_at: Time.at(phpbb_post['post_edit_time']))
+
+      # for a new topic: also clear mail deliveries
+      ActionMailer::Base.deliveries = []
     else
       print ".".yellow
       $stdout.flush
@@ -306,6 +309,24 @@ def sanitize_text(text)
   #image tags
   text.gsub! /\[(img:[a-z0-9]+)\](.*?)\[\/\1\]/, '![image](\2)'
   
+  #youtube
+  text.gsub! /\[(youtube:[a-z0-9]+)\](.*?)\[\/\1\]/, ' \2 '
+  # [youtube:2hehxrka]http://www.youtube.com/watch?v=q0YS0cBJzyA[/youtube:2hehxrka]
+  
+  # newlines
+  text.gsub! /\n([^\n])/, "  \n\1"
+  
+  # bold text
+  text.gsub! /\[(b:[a-z0-9]+)\](.*?)\[\/\1\]/, '**\2**'
+  
+  # italic text
+  text.gsub! /\[(i:[a-z0-9]+)\](.*?)\[\/\1\]/, '*\2*'
+    
+  # quotes
+  # [quote="username":380gu4km]text[/quote:380gu4km]
+  text.gsub! /\[quote="([A-Za-z0-9]+)":([a-z0-9]+)\](.*?)\[\/quote:\2\]/,
+    "[quote=\"\1\"]\n\3[\/quote]"
+  
   text
 end
 
@@ -330,6 +351,8 @@ def dc_backup_site_settings
   s = {}
   Discourse::Application.configure do
     s['mailer'] = config.action_mailer.perform_deliveries
+    s['method'] = config.action_mailer.delivery_method
+    s['errors'] = config.action_mailer.raise_delivery_errors = false
   end
   
   s['unique_posts_mins'] = SiteSetting.unique_posts_mins
@@ -355,6 +378,8 @@ def dc_restore_site_settings
   s = @site_settings
   Discourse::Application.configure do
     config.action_mailer.perform_deliveries = s['mailer']
+    config.action_mailer.delivery_method = s['method']
+    config.action_mailer.raise_delivery_errors = s['errors']
   end
   SiteSetting.send("unique_posts_mins=", s['unique_posts_mins'])
   SiteSetting.send("rate_limit_create_topic=", s['rate_limit_create_topic'])
@@ -375,7 +400,10 @@ end
 # Set temporary site settings needed for this rake task
 def dc_set_temporary_site_settings
   Discourse::Application.configure do
+    # it seems this is not enough
     config.action_mailer.perform_deliveries = false
+    config.action_mailer.delivery_method = :test
+    config.action_mailer.raise_delivery_errors = false
   end
   
   SiteSetting.send("unique_posts_mins=", 0)

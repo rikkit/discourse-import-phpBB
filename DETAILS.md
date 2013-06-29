@@ -1,6 +1,5 @@
 # Notes for converting phpBB to Discourse
 
-
 ## Getting data from phpBB
 
 This query selects all posts, along with their user ids, topic ids, post ids, usernames and topic names.
