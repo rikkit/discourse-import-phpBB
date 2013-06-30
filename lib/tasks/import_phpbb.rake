@@ -320,7 +320,7 @@ def sanitize_text(text)
   text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
 
   # completely remove youtube, soundcloud and url tags as those links are oneboxed
-  text.gsub! /\[\/?(youtube|soundcloud|url|img)\]/, ' '
+  text.gsub! /\[(youtube|soundcloud|url|img)\](.*?)\[\/\1\]/m, ' \2 '
 
   # yt tags are custom for our forum
   text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
@@ -370,11 +370,11 @@ end
 # Backup site settings
 def dc_backup_site_settings
   s = {}
-  Discourse::Application.configure do
-    s['mailer'] = config.action_mailer.perform_deliveries
-    s['method'] = config.action_mailer.delivery_method
-    s['errors'] = config.action_mailer.raise_delivery_errors = false
-  end
+  #Discourse::Application.configure do
+  #  s['mailer'] = config.action_mailer.perform_deliveries
+  #  s['method'] = config.action_mailer.delivery_method
+  #  s['errors'] = config.action_mailer.raise_delivery_errors = false
+  #end
   
   s['unique_posts_mins'] = SiteSetting.unique_posts_mins
   s['rate_limit_create_topic'] = SiteSetting.rate_limit_create_topic
