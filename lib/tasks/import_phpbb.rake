@@ -293,6 +293,9 @@ def dc_create_users_from_phpbb_users
       puts "User (#{phpbb_user['user_id']}) #{phpbb_user['username']} (#{dc_username} / #{dc_email}) created".green
     else
       puts "User (#{phpbb_user['user_id']}) #{phpbb_user['username']} (#{dc_username} / #{dc_email}) found".green
+      u = User.where('username = ?', dc_username).first
+      u.last_seen_at = Time.now
+      u.save!
     end
   end
 end
@@ -316,8 +319,8 @@ def sanitize_text(text)
   # remove tag IDs
   text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
 
-  # completely remove youtube and soundcloud tags as those links are oneboxed
-  text.gsub! /\[\/?(youtube|soundcloud)\]/, ' '
+  # completely remove youtube, soundcloud and url tags as those links are oneboxed
+  text.gsub! /\[\/?(youtube|soundcloud|url)\]/, ' '
 
   # yt tags are custom for our forum
   text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
