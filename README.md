@@ -7,11 +7,11 @@ This rake task will import all threads and posts of a phpBB Forum into Discourse
   but the mail addresses are set, so they can regain control and gravatar works, if they have one
 * there is a test-mode which will just connect to mysql and read posts
 * post bodies are sanitized:
-  * image and youtube tags are replaced
-  * italic and bold tags are replaced
-  * quotes are replaced
-  * newlines are fixed
-  * CAPSLOCK and :3 symbol-only messages are prefixed with <capslock> and <symbols>
+  * youtube and soundcloud tags are removed (because discourse does oneboxing for them)
+  * bbcode tags are cleaned up
+  * newlines are converted to markdown syntax
+  * `[code]` tags are converted to markdown syntax
+  * CAPSLOCK and `\(^-^)/` symbol-only messages are prefixed with `<capslock>` and `<symbols>`
 
 Use at your own risk! Please test on a dummy Discourse install first.
 

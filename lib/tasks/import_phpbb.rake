@@ -164,7 +164,6 @@ def sql_fetch_users
 end
 
 def sql_import_posts
-  #TODO
   post_count = 0
   topics = {}
   @phpbb_posts.each do |phpbb_post|
@@ -181,7 +180,7 @@ def sql_import_posts
     dc_user = dc_get_user(phpbb_username_to_dc(user['username_clean']))
     category = dc_get_or_create_category(
       phpbb_post['forum_name'].gsub(' ','-').downcase, DC_ADMIN)
-    topic_title = phpbb_post['topic_title']
+    topic_title = sanitize_topic phpbb_post['topic_title']
     # Remove new lines and replace with a space
     # topic_title = topic_title.gsub( /\n/m, " " )
     
@@ -224,8 +223,16 @@ def sql_import_posts
         created_at: Time.at(phpbb_post['post_time']),
         updated_at: Time.at(phpbb_post['post_edit_time']))
     end
-    post = post_creator.create
-    
+    post = nil
+    begin
+      post = post_creator.create
+    rescue Exception => e
+      puts "Error #{e} on post #{phpbb_post['post_id']}:\n#{text}"
+      puts "--"
+      puts e.inspect
+      puts e.backtrace
+      abort
+    end
     # Everything set, save the topic
     unless post_creator.errors.present? then
       post_serializer = PostSerializer.new(post, scope: true, root: false)
@@ -255,7 +262,6 @@ end
 
 # Create a Discourse user with Facebook info unless it already exists
 def dc_create_users_from_phpbb_users
-  #TODO
   @phpbb_users.each do |phpbb_user|
     # Setup Discourse username
     dc_username = phpbb_username_to_dc(phpbb_user['username_clean'])
@@ -265,30 +271,25 @@ def dc_create_users_from_phpbb_users
     if dc_email.nil? or dc_email.empty? then
       dc_email = dc_username + "@dc.q1cc.net"
     end
-    
-    approved = if phpbb_user['user_inactive_reason'] == 0
-      DC_ADMIN.id
-    else
-      nil
-    end
-    
+
+    approved = phpbb_user['user_inactive_reason'] == 0
+    approved_by_id =  if approved
+                        DC_ADMIN.id
+                      else
+                        nil
+                      end
+
     # Create user if it doesn't exist
     if User.where('username = ?', dc_username).empty? then
       dc_user = User.create!(username: dc_username,
                              name: phpbb_user['username'],
                              email: dc_email,
-                             approved: true,
-                             approved_by_id: approved)
+                             approved: approved,
+                             approved_by_id: approved_by_id,
+                             # This is needed to suppress notification spam
+                             last_seen_at: Time.now)
 
-      #TODO: add CAS auth
-      # Create Facebook credentials so the user could login later and claim his account
-      # FacebookUserInfo.create!(user_id: dc_user.id,
-      #                         facebook_user_id: fb_writer['id'].to_i,
-      #                         username: fb_writer['username'],
-      #                         first_name: fb_writer['first_name'],
-      #                         last_name: fb_writer['last_name'],
-      #                         name: fb_writer['name'].tr(' ', '_'),
-      #                         link: fb_writer['link'])*/
+      #TODO: add authentication info
       puts "User (#{phpbb_user['user_id']}) #{phpbb_user['username']} (#{dc_username} / #{dc_email}) created".green
     else
       puts "User (#{phpbb_user['user_id']}) #{phpbb_user['username']} (#{dc_username} / #{dc_email}) found".green
@@ -296,60 +297,54 @@ def dc_create_users_from_phpbb_users
   end
 end
 
+def sanitize_topic(text)
+  CGI.unescapeHTML(text)
+end
+
 def sanitize_text(text)
   text = CGI.unescapeHTML(text)
-  
+
   # screaming
   if not seems_quiet?(text)
     text = "<capslock> " + text.downcase
   end
-  
+
   if not seems_pronounceable?(text)
     text = "<symbols>\n" + text
   end
-  
-  #image tags
-  text.gsub! /\[(img:[a-z0-9]+)\](.*?)\[\/\1\]/, ' ![image](\2)'
-  
-  # youtube, soundcloud or urls
-  # [youtube:2hehxrka]http://www.youtube.com/watch?v=q0YS0cBJzyA[/youtube:2hehxrka]
-  text.gsub! /\[((youtube|soundcloud|url):[a-z0-9]+)\](.*?)\[\/\1\]/, ' \3 '
-  
-  # url tags with description
-  # [url=https://link:27l5zntr]source[/url:27l5zntr]
-  text.gsub! /\[url=(.*?):([a-z0-9]+)\](.*?)\[\/url:\2\]/, ' [\3](\1) '
-  
-  # newlines
+
+  # remove tag IDs
+  text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
+
+  # completely remove youtube and soundcloud tags as those links are oneboxed
+  text.gsub! /\[\/?(youtube|soundcloud)\]/, ' '
+
+  # yt tags are custom for our forum
+  text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
+
+  # convert newlines to markdown syntax
   text.gsub! /([^\n])\n/, '\1  '+"\n"
-  
-  # bold text
-  text.gsub! /\[(b:[a-z0-9]+)\](.*?)\[\/\1\]/m, '**\2**'
-  
-  # italic text
-  text.gsub! /\[(i:[a-z0-9]+)\](.*?)\[\/\1\]/m, '*\2*'
-    
-  # quotes
-  # [quote=&quot;cfstras&quot;:uujr5ltn]TEXT[/quote:uujr5ltn]
-  newtext = text
-  begin
-    text = newtext
-    newtext = text.sub /\[quote="(.*?)":([a-z0-9]+)\](.*?)\[\/quote:\2\]/m,
-      '[quote="\1"]' + "\n" + '\3' + "\n" + '[/quote]'
-  end until newtext == text
-  
+
   # strange links (maybe soundcloud)
   # <!-- m --><a class="postlink" href="http://link">http://link</a><!-- m -->
-  text.gsub! /<!-- m --><a class="postlink" href="(.*?)">.*?<\/a><!-- m -->/, ' \1 '
-  
-  # code blocks
-  text.gsub! /\[(code:[a-z0-9]+)\](.*?)\[\/\1\]/m do |match|
-    $2.gsub(/(  )?\n(.)/, "\n"+'    \2').gsub(/^/, '    ').gsub(/$/, "\n")
+  text.gsub! /<!-- m --><a class="postlink" href="(.*?)">.*?<\/a><!-- m -->/m, ' \1 '
+
+  # convert code blocks to markdown syntax
+  text.gsub! /\[code\](.*?)\[\/code\]/m do |match|
+    "\n    " + $1.gsub(/(  )?\n(.)/, "\n"+'    \2') + "\n"
   end
-  
-  # remove size tags
+
+  # size tags
+  # discourse likes numbers from 4-40 (pt), phpbb uses 20 to 200 (percent)
   # [size=85:az5et819]dump dump[/size:az5et819]
-  text.gsub! /\[size=\d+:([a-z0-9]+)\](.*?)\[\/size:\1\]/m, '\2'
-  
+  text.gsub! /\[size=(\d+)(%?)\]/ do |match|
+    pt = $1.to_i / 100 * 14 # 14 is the default text size
+    pt = 40 if pt > 40
+    pt = 4 if pt < 4
+
+    "[size=#{pt}]"
+  end
+
   text
 end
 
@@ -391,7 +386,8 @@ def dc_backup_site_settings
   s['newuser_max_links'] = SiteSetting.newuser_max_links
   s['newuser_max_images'] = SiteSetting.newuser_max_images
   s['max_word_length'] = SiteSetting.max_word_length
-  #@site_settings['abc'] = SiteSetting.abc
+  s['email_time_window_mins'] = SiteSetting.email_time_window_mins
+  #s['abc'] = SiteSetting.abc
   
   @site_settings = s
 end
@@ -399,11 +395,11 @@ end
 # Restore site settings
 def dc_restore_site_settings
   s = @site_settings
-  Discourse::Application.configure do
-    config.action_mailer.perform_deliveries = s['mailer']
-    config.action_mailer.delivery_method = s['method']
-    config.action_mailer.raise_delivery_errors = s['errors']
-  end
+  #Discourse::Application.configure do
+  #  config.action_mailer.perform_deliveries = s['mailer']
+  #  config.action_mailer.delivery_method = s['method']
+  #  config.action_mailer.raise_delivery_errors = s['errors']
+  #end
   SiteSetting.send("unique_posts_mins=", s['unique_posts_mins'])
   SiteSetting.send("rate_limit_create_topic=", s['rate_limit_create_topic'])
   SiteSetting.send("rate_limit_create_post=", s['rate_limit_create_post'])
@@ -417,17 +413,18 @@ def dc_restore_site_settings
   SiteSetting.send("newuser_max_links=", s['newuser_max_links'])
   SiteSetting.send("newuser_max_images=", s['newuser_max_images'])
   SiteSetting.send("max_word_length=", s['max_word_length'])
-  #SiteSetting.send("abc=", @site_settings['abc'])
+  SiteSetting.send("email_time_window_mins=", s['email_time_window_mins'])
+  #SiteSetting.send("abc=", s['abc'])
 end
 
 # Set temporary site settings needed for this rake task
 def dc_set_temporary_site_settings
-  Discourse::Application.configure do
-    # it seems this is not enough
-    config.action_mailer.perform_deliveries = false
-    config.action_mailer.delivery_method = :test
-    config.action_mailer.raise_delivery_errors = false
-  end
+  #Discourse::Application.configure do
+  #  # it seems this is not enough
+  #  config.action_mailer.perform_deliveries = false
+  #  config.action_mailer.delivery_method = :test
+  #  config.action_mailer.raise_delivery_errors = false
+  #end
   
   SiteSetting.send("unique_posts_mins=", 0)
   SiteSetting.send("rate_limit_create_topic=", 0)
@@ -442,6 +439,7 @@ def dc_set_temporary_site_settings
   SiteSetting.send("newuser_max_links=", 1000)
   SiteSetting.send("newuser_max_images=", 1000)
   SiteSetting.send("max_word_length=", 5000)
+  SiteSetting.send("email_time_window_mins=", 1440)
   #SiteSetting.send("abc=", 0)
 end
 
