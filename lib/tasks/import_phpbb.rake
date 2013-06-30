@@ -320,7 +320,7 @@ def sanitize_text(text)
   text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
 
   # completely remove youtube, soundcloud and url tags as those links are oneboxed
-  text.gsub! /\[\/?(youtube|soundcloud|url)\]/, ' '
+  text.gsub! /\[\/?(youtube|soundcloud|url|img)\]/, ' '
 
   # yt tags are custom for our forum
   text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
