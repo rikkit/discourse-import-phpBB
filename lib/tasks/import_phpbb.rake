@@ -179,7 +179,7 @@ def sql_import_posts
     # Get the Discourse user of this writer
     dc_user = dc_get_user(phpbb_username_to_dc(user['username_clean']))
     category = dc_get_or_create_category(
-      phpbb_post['forum_name'].gsub(' ','-').downcase, DC_ADMIN)
+      phpbb_post['forum_name'].downcase, DC_ADMIN)
     topic_title = sanitize_topic phpbb_post['topic_title']
     # Remove new lines and replace with a space
     # topic_title = topic_title.gsub( /\n/m, " " )
@@ -327,7 +327,10 @@ def sanitize_text(text)
 
   # convert newlines to markdown syntax
   text.gsub! /([^\n])\n/, '\1  '+"\n"
-
+  
+  # edit invalid quotes
+  text.gsub! /\[quote\]/, '[quote=""]'
+  
   # strange links (maybe soundcloud)
   # <!-- m --><a class="postlink" href="http://link">http://link</a><!-- m -->
   text.gsub! /<!-- m --><a class="postlink" href="(.*?)">.*?<\/a><!-- m -->/m, ' \1 '
