@@ -284,6 +284,7 @@ def create_users
       dc_user = User.create!(username: dc_username,
                              name: phpbb_user['username'],
                              email: dc_email,
+                             active: approved,
                              approved: approved,
                              approved_by_id: approved_by_id,
                              # This is needed to suppress notification spam
