@@ -71,7 +71,7 @@ task "import:phpbb" => 'environment' do
       # Then set the temporary Site Settings we need
       dc_set_temporary_site_settings
       # Create users in Discourse
-      dc_create_users_from_phpbb_users
+      create_users
 
       # Import posts into Discourse
       sql_import_posts
@@ -178,17 +178,17 @@ def sql_import_posts
     
     # Get the Discourse user of this writer
     dc_user = dc_get_user(phpbb_username_to_dc(user['username_clean']))
-    category = dc_get_or_create_category(
+    category = create_category(
       phpbb_post['forum_name'].downcase, DC_ADMIN)
     topic_title = sanitize_topic phpbb_post['topic_title']
     # Remove new lines and replace with a space
     # topic_title = topic_title.gsub( /\n/m, " " )
     
     # are we creating a new topic?
-    newtopic = false
+    is_new_topic = false
     topic = topics[phpbb_post['topic_id']]
     if topic.nil?
-      newtopic = true
+      is_new_topic = true
     end
     
     # some progress
@@ -198,7 +198,7 @@ def sql_import_posts
     
     # create!
     post_creator = nil
-    if newtopic
+    if is_new_topic
       print "\n[#{progress}%] Creating topic ".yellow + topic_title +
         " (#{Time.at(phpbb_post['post_time'])}) in category ".yellow +
         "#{category.name}"
@@ -234,23 +234,23 @@ def sql_import_posts
       abort
     end
     # Everything set, save the topic
-    unless post_creator.errors.present? then
+    if post_creator.errors.present? # Skip if not valid for some reason
+      puts "\nContents of topic from post #{phpbb_post['post_id']} failed to ".red+
+               "import: #{post_creator.errors.full_messages}".red
+    else
       post_serializer = PostSerializer.new(post, scope: true, root: false)
       post_serializer.topic_slug = post.topic.slug if post.topic.present?
       post_serializer.draft_sequence = DraftSequence.current(dc_user, post.topic.draft_key)
       #save id to hash
-      topics[phpbb_post['topic_id']] = post.topic.id if newtopic
-      puts "\nTopic #{phpbb_post['post_id']} created".green if newtopic
-    else # Skip if not valid for some reason
-      puts "\nContents of topic from post #{phpbb_post['post_id']} failed to ".red+
-        "import: #{post_creator.errors.full_messages}".red
+      topics[phpbb_post['topic_id']] = post.topic.id if is_new_topic
+      puts "\nTopic #{phpbb_post['post_id']} created".green if is_new_topic
     end
   end
 end
 
 
 # Returns the Discourse category where imported posts will go
-def dc_get_or_create_category(name, owner)
+def create_category(name, owner)
   if Category.where('name = ?', name).empty? then
     puts "\nCreating category '#{name}'".yellow
     Category.create!(name: name, user_id: owner.id)
@@ -261,7 +261,7 @@ def dc_get_or_create_category(name, owner)
 end
 
 # Create a Discourse user with Facebook info unless it already exists
-def dc_create_users_from_phpbb_users
+def create_users
   @phpbb_users.each do |phpbb_user|
     # Setup Discourse username
     dc_username = phpbb_username_to_dc(phpbb_user['username_clean'])
@@ -308,11 +308,11 @@ def sanitize_text(text)
   text = CGI.unescapeHTML(text)
 
   # screaming
-  if not seems_quiet?(text)
-    text = "<capslock> " + text.downcase
+  unless seems_quiet?(text)
+    text = '<capslock> ' + text.downcase
   end
 
-  if not seems_pronounceable?(text)
+  unless seems_pronounceable?(text)
     text = "<symbols>\n" + text
   end
 
@@ -393,6 +393,7 @@ def dc_backup_site_settings
   s['newuser_max_images'] = SiteSetting.newuser_max_images
   s['max_word_length'] = SiteSetting.max_word_length
   s['email_time_window_mins'] = SiteSetting.email_time_window_mins
+  s['topic_title_length'] = SiteSetting.topic_title_length
   #s['abc'] = SiteSetting.abc
   
   @site_settings = s
@@ -420,6 +421,7 @@ def dc_restore_site_settings
   SiteSetting.send("newuser_max_images=", s['newuser_max_images'])
   SiteSetting.send("max_word_length=", s['max_word_length'])
   SiteSetting.send("email_time_window_mins=", s['email_time_window_mins'])
+  SiteSetting.send("topic_title_length=", s['topic_title_length'])
   #SiteSetting.send("abc=", s['abc'])
 end
 
@@ -442,6 +444,7 @@ def dc_set_temporary_site_settings
   SiteSetting.send("min_post_length=", 1) # never set this to 0
   SiteSetting.send("newuser_spam_host_threshold=", 1000)
   SiteSetting.send("min_topic_title_length=", 2)
+  SiteSetting.send("topic_title_length=", 1..512)
   SiteSetting.send("newuser_max_links=", 1000)
   SiteSetting.send("newuser_max_images=", 1000)
   SiteSetting.send("max_word_length=", 5000)
