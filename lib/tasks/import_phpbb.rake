@@ -393,7 +393,7 @@ def dc_backup_site_settings
   s['newuser_max_images'] = SiteSetting.newuser_max_images
   s['max_word_length'] = SiteSetting.max_word_length
   s['email_time_window_mins'] = SiteSetting.email_time_window_mins
-  s['topic_title_length'] = SiteSetting.topic_title_length
+  s['max_topic_title_length'] = SiteSetting.max_topic_title_length
   #s['abc'] = SiteSetting.abc
   
   @site_settings = s
@@ -421,7 +421,7 @@ def dc_restore_site_settings
   SiteSetting.send("newuser_max_images=", s['newuser_max_images'])
   SiteSetting.send("max_word_length=", s['max_word_length'])
   SiteSetting.send("email_time_window_mins=", s['email_time_window_mins'])
-  SiteSetting.send("topic_title_length=", s['topic_title_length'])
+  SiteSetting.send("max_topic_title_length=", s['max_topic_title_length'])
   #SiteSetting.send("abc=", s['abc'])
 end
 
@@ -444,7 +444,7 @@ def dc_set_temporary_site_settings
   SiteSetting.send("min_post_length=", 1) # never set this to 0
   SiteSetting.send("newuser_spam_host_threshold=", 1000)
   SiteSetting.send("min_topic_title_length=", 2)
-  SiteSetting.send("topic_title_length=", 1..512)
+  SiteSetting.send("max_topic_title_length=", 512)
   SiteSetting.send("newuser_max_links=", 1000)
   SiteSetting.send("newuser_max_images=", 1000)
   SiteSetting.send("max_word_length=", 5000)
