@@ -25,3 +25,14 @@ This query is used for getting user info:
       WHERE g.group_name != 'BOTS'
       ORDER BY u.user_id ASC
       LIMIT #{offset}, 50;
+
+
+This query might help with getting info about what user read which topic (how far):  
+(I'm not really sure whether `phpbb_topics_track` is the right table, but it seems that way)
+
+    SELECT username, topic_title, FROM_UNIXTIME( mark_time,  '%Y-%m-%d' ) 
+      FROM phpbb_topics_track tr
+      JOIN phpbb_users u ON tr.user_id = u.user_id
+      JOIN phpbb_topics t ON t.topic_id = tr.topic_id
+      ORDER BY mark_time DESC 
+      LIMIT 0 , 30
