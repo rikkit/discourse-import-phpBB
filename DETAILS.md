@@ -4,7 +4,7 @@
 
 This query selects all posts, along with their user ids, topic ids, post ids, usernames and topic names.
 
-   SELECT t.topic_id, t.topic_title,
+    SELECT t.topic_id, t.topic_title,
       u.username, u.user_id,
       f.forum_name,
       p.post_time, p.post_edit_time,
@@ -15,7 +15,7 @@ This query selects all posts, along with their user ids, topic ids, post ids, us
       JOIN phpbb_users u ON u.user_id=p.poster_id
       JOIN phpbb_forums f ON t.forum_id=f.forum_id
       ORDER BY topic_id ASC, topic_title ASC, post_id ASC
-      LIMIT #{offset.to_s},500;
+      LIMIT #{offset.to_s}, 500;
 
 This query is used for getting user info:
 
