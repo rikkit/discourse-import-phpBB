@@ -4,7 +4,7 @@
 #### originally created for facebook by Sander Datema (info@sanderdatema.nl)
 #### forked by Claus F. Strasburger ( http://about.me/cfstras )
 ####
-#### version 0.1
+#### version 0.2
 ############################################################
 
 ############################################################
@@ -34,6 +34,7 @@ task "import:phpbb" => 'environment' do
   @config = YAML.load_file('config/import_phpbb.yml')
   TEST_MODE = @config['test_mode']
   DC_ADMIN = @config['discourse_admin']
+  MARKDOWN_LINEBREAKS = true
 
   if TEST_MODE then puts "\n*** Running in TEST mode. No changes to Discourse database are made\n".yellow end
 
@@ -51,6 +52,16 @@ task "import:phpbb" => 'environment' do
   end
 
   begin
+    # ask for markdown setting
+
+    input = ''
+    puts "Do you want to enable traditional markdown-linebreaks? (linebreaks are ignored unless the line ends with two spaces)"
+    print "y/N? >"
+    input = STDIN.gets.chomp
+    MARKDOWN_LINEBREAKS = ( /y(es)?/i.match(input) or input.empty? )
+
+    puts "Using markdown linebreaks: "+MARKDOWN_LINEBREAKS.to_s
+
     sql_connect
 
     sql_fetch_users
@@ -145,7 +156,8 @@ def sql_fetch_users
   offset = 0
   loop do
     count = 0
-    query = "SELECT * 
+    query = "SELECT user_id, username_clean, username,
+      user_email, user_posts, user_inactive_reason, user_lastvisit, group_name
       FROM phpbb_users u
       JOIN phpbb_groups g ON g.group_id = u.group_id
       WHERE g.group_name != 'BOTS'
@@ -269,7 +281,7 @@ def create_users
     dc_email = phpbb_user['user_email']
     # Create email address for user
     if dc_email.nil? or dc_email.empty? then
-      dc_email = dc_username + "@dc.q1cc.net"
+      dc_email = dc_username + "@has.no.email"
     end
 
     approved = phpbb_user['user_inactive_reason'] == 0
@@ -279,24 +291,35 @@ def create_users
                         nil
                       end
 
+    admin = if phpbb_user['group_name'] == 'ADMINISTRATORS'
+            true
+              else
+            false
+              end
+
     # Create user if it doesn't exist
     if User.where('username = ?', dc_username).empty? then
-      dc_user = User.create!(username: dc_username,
-                             name: phpbb_user['username'],
-                             email: dc_email,
-                             active: approved,
-                             approved: approved,
-                             approved_by_id: approved_by_id,
-                             # This is needed to suppress notification spam
-                             last_seen_at: Time.now)
 
+      begin
+        dc_user = User.create!(username: dc_username,
+                               name: phpbb_user['username'],
+                               email: dc_email,
+                               active: phpbb_user['user_posts'] > 0,
+                               approved: approved,
+                               approved_by_id: approved_by_id,
+                               admin: admin,
+                               last_seen_at: Time.at(phpbb_user['user_lastvisit']))
+      rescue Exception => e
+        puts "Error #{e} on user #{dc_username} <#{dc_email}>"
+        puts "--"
+        puts e.inspect
+        puts e.backtrace
+        abort
+      end
       #TODO: add authentication info
       puts "User (#{phpbb_user['user_id']}) #{phpbb_user['username']} (#{dc_username} / #{dc_email}) created".green
     else
       puts "User (#{phpbb_user['user_id']}) #{phpbb_user['username']} (#{dc_username} / #{dc_email}) found".green
-      u = User.where('username = ?', dc_username).first
-      u.last_seen_at = Time.now
-      u.save!
     end
   end
 end
@@ -321,13 +344,13 @@ def sanitize_text(text)
   text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
 
   # completely remove youtube, soundcloud and url tags as those links are oneboxed
-  text.gsub! /\[(youtube|soundcloud|url|img)\](.*?)\[\/\1\]/m, ' \2 '
+  text.gsub! /\[(youtube|soundcloud|url|img)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
 
   # yt tags are custom for our forum
   text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
 
   # convert newlines to markdown syntax
-  text.gsub! /([^\n])\n/, '\1  '+"\n"
+  text.gsub! /([^\n])\n/, '\1  '+"\n" if MARKDOWN_LINEBREAKS
   
   # edit invalid quotes
   text.gsub! /\[quote\]/, '[quote=""]'
@@ -428,13 +451,9 @@ end
 
 # Set temporary site settings needed for this rake task
 def dc_set_temporary_site_settings
-  #Discourse::Application.configure do
-  #  # it seems this is not enough
-  #  config.action_mailer.perform_deliveries = false
-  #  config.action_mailer.delivery_method = :test
-  #  config.action_mailer.raise_delivery_errors = false
-  #end
-  
+  # don't backup this first one
+  SiteSetting.send("traditional_markdown_linebreaks=", MARKDOWN_LINEBREAKS)
+
   SiteSetting.send("unique_posts_mins=", 0)
   SiteSetting.send("rate_limit_create_topic=", 0)
   SiteSetting.send("rate_limit_create_post=", 0)
@@ -449,7 +468,7 @@ def dc_set_temporary_site_settings
   SiteSetting.send("newuser_max_links=", 1000)
   SiteSetting.send("newuser_max_images=", 1000)
   SiteSetting.send("max_word_length=", 5000)
-  SiteSetting.send("email_time_window_mins=", 1440)
+  SiteSetting.send("email_time_window_mins=", 1)
   #SiteSetting.send("abc=", 0)
 end
 

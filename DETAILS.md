@@ -28,7 +28,7 @@ This query is used for getting user info:
 
 
 This query might help with getting info about what user read which topic (how far):  
-(I'm not really sure whether `phpbb_topics_track` is the right table, but it seems that way)
+(I'm not really sure whether `phpbb_topics_track` is the right table, but it might be)
 
     SELECT username, topic_title, FROM_UNIXTIME( mark_time,  '%Y-%m-%d' ) 
       FROM phpbb_topics_track tr
