@@ -1,3 +1,10 @@
+# Note
+
+I don't have the time to work on this actively anymore. Since Discourse is still in early beta,
+this importer might not even work anymore. If you want to take over the project, I'll give up this
+repository to anyone who sends useful and sane pull requests. For more details and discussion, see
+[this thread on Discourse Meta](http://meta.discourse.org/t/importing-phpbb-into-discourse/7956).
+
 # What is this?
 
 This rake task will import all threads and posts of a phpBB Forum into Discourse.
