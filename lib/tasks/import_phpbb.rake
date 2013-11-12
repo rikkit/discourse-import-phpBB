@@ -65,9 +65,11 @@ task "import:phpbb" => 'environment' do
     sql_connect
 
     sql_fetch_users
-    sql_fetch_posts
 
     if TEST_MODE then
+
+      sql_fetch_posts
+
       begin
         require 'irb'
         ARGV.clear
@@ -85,7 +87,7 @@ task "import:phpbb" => 'environment' do
       create_users
 
       # Import posts into Discourse
-      sql_import_posts
+      sql_fetch_posts
 
       # Restore Site Settings
       dc_restore_site_settings
@@ -114,8 +116,8 @@ def sql_connect
   puts "\nConnected to SQL DB".green
 end
 
-def sql_fetch_posts
-  @phpbb_posts ||= [] # Initialize if needed
+def sql_fetch_posts(*parse)
+  @phpbb_posts ||= [] # Initialize
   offset = 0
 
   # Fetch Facebook posts in batches and download writer/user info
@@ -144,6 +146,12 @@ def sql_fetch_posts
     
     puts "Batch: #{count.to_s} posts".green
     offset += count
+
+    if !TEST_MODE then
+      sql_import_posts
+      @phpbb_posts.clear
+    end
+
     break if count == 0 or count < 500 # No more posts to import
   end
 
@@ -201,6 +209,7 @@ def sql_import_posts
     topic = topics[phpbb_post['topic_id']]
     if topic.nil?
       is_new_topic = true
+      print "new topic".blue + is_new_topic.to_s
     end
     
     # some progress
