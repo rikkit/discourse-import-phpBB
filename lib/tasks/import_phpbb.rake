@@ -117,6 +117,8 @@ def sql_connect
 end
 
 def sql_fetch_posts(*parse)
+  @post_count = 0
+  @topics = {}
   @phpbb_posts ||= [] # Initialize
   offset = 0
 
@@ -184,10 +186,8 @@ def sql_fetch_users
 end
 
 def sql_import_posts
-  post_count = 0
-  topics = {}
   @phpbb_posts.each do |phpbb_post|
-    post_count += 1
+    @post_count += 1
 
     # Get details of the writer of this post
     user = @phpbb_users.find {|k| k['user_id'] == phpbb_post['user_id']}
@@ -206,14 +206,14 @@ def sql_import_posts
     
     # are we creating a new topic?
     is_new_topic = false
-    topic = topics[phpbb_post['topic_id']]
+    topic = @topics[phpbb_post['topic_id']]
     if topic.nil?
       is_new_topic = true
       print "new topic".blue + is_new_topic.to_s
     end
     
     # some progress
-    progress = post_count.percent_of(@phpbb_posts.count).round.to_s
+    progress = @post_count.percent_of(@phpbb_posts.count).round.to_s
     
     text = sanitize_text phpbb_post['post_text']
     
@@ -263,9 +263,11 @@ def sql_import_posts
       post_serializer.topic_slug = post.topic.slug if post.topic.present?
       post_serializer.draft_sequence = DraftSequence.current(dc_user, post.topic.draft_key)
       #save id to hash
-      topics[phpbb_post['topic_id']] = post.topic.id if is_new_topic
+      @topics[phpbb_post['topic_id']] = post.topic.id if is_new_topic
       puts "\nTopic #{phpbb_post['post_id']} created".green if is_new_topic
     end
+
+    puts "\nAdded post".green + @post_count.to_s
   end
 end
 
