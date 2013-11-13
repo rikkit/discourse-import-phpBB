@@ -62,6 +62,12 @@ task "import:phpbb" => 'environment' do
 
     puts "Using markdown linebreaks: "+MARKDOWN_LINEBREAKS.to_s
 
+    puts "Choose the post offset (determines which post the import starts with, useful if an import was interrupted)"
+    print ">"
+    input = STDIN.gets.chomp
+    @offset = Integer(input)
+    puts "Post offset set to " + @offset.to_s
+
     sql_connect
 
     sql_fetch_users
@@ -117,10 +123,9 @@ def sql_connect
 end
 
 def sql_fetch_posts(*parse)
-  @post_count = 0
+  @post_count = @offset
   @topics = {}
   @phpbb_posts ||= [] # Initialize
-  offset = 0
 
   # Fetch Facebook posts in batches and download writer/user info
   loop do
@@ -135,8 +140,8 @@ def sql_fetch_posts(*parse)
       JOIN phpbb_users u ON u.user_id=p.poster_id
       JOIN phpbb_forums f ON t.forum_id=f.forum_id
       ORDER BY topic_id ASC, topic_title ASC, post_id ASC
-      LIMIT #{offset.to_s},500;"
-    puts query.yellow if offset == 0
+      LIMIT #{@offset.to_s},500;"
+    puts query.yellow if @offset == 0
     result = @sql.query query
     
     count = 0
@@ -146,8 +151,8 @@ def sql_fetch_posts(*parse)
       count += 1
     end
     
-    puts "Batch: #{count.to_s} posts".green
-    offset += count
+    puts "Batch ".green + ((@offset%500) + 1).to_s.green
+    @offset += count
 
     if !TEST_MODE then
       sql_import_posts
@@ -157,7 +162,7 @@ def sql_fetch_posts(*parse)
     break if count == 0 or count < 500 # No more posts to import
   end
 
-  puts "\nAmount of posts: #{@phpbb_posts.count.to_s}".green
+  puts "\nTotal posts: #{@phpbb_posts.count.to_s}".green
 end
 
 def sql_fetch_users
@@ -206,6 +211,8 @@ def sql_import_posts
     
     # are we creating a new topic?
     is_new_topic = false
+
+    # TODO this needs a list of topics on target forum to recover from partial import.
     topic = @topics[phpbb_post['topic_id']]
     if topic.nil?
       is_new_topic = true
@@ -267,7 +274,8 @@ def sql_import_posts
       puts "\nTopic #{phpbb_post['post_id']} created".green if is_new_topic
     end
 
-    puts "\nAdded post".green + @post_count.to_s
+    puts "\n[".green + @post_count.to_s.green + "] added".green
+    puts "  " + text.to_s
   end
 end
 
@@ -355,10 +363,12 @@ def sanitize_text(text)
   text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
 
   # completely remove youtube, soundcloud and url tags as those links are oneboxed
-  text.gsub! /\[(youtube|soundcloud|url|img)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
+  # color is not supported
+  text.gsub! /\[(youtube|soundcloud|url|img|color)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
 
   # yt tags are custom for our forum
   text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
+  text.gsub! /\[youtubefull\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
 
   # convert newlines to markdown syntax
   text.gsub! /([^\n])\n/, '\1  '+"\n" if MARKDOWN_LINEBREAKS
