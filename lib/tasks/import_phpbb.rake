@@ -62,12 +62,6 @@ task "import:phpbb" => 'environment' do
 
     puts "Using markdown linebreaks: "+MARKDOWN_LINEBREAKS.to_s
 
-    puts "Choose the post offset (determines which post the import starts with, useful if an import was interrupted)"
-    print ">"
-    input = STDIN.gets.chomp
-    @offset = Integer(input)
-    puts "Post offset set to " + @offset.to_s
-
     sql_connect
 
     sql_fetch_users
@@ -123,17 +117,18 @@ def sql_connect
 end
 
 def sql_fetch_posts(*parse)
-  @post_count = @offset
+  @post_count = @offset = 0
   @topics = {}
   @phpbb_posts ||= [] # Initialize
 
   # Fetch Facebook posts in batches and download writer/user info
   loop do
-    query = "SELECT t.topic_id, t.topic_title,
+    query = "SELECT t.topic_id, t.discourse_id, t.topic_title,
       u.username, u.user_id,
       f.forum_name,
       p.post_time, p.post_edit_time,
       p.post_id,
+      p.discourse_id,
       p.post_text
       FROM phpbb_posts p
       JOIN phpbb_topics t ON t.topic_id=p.topic_id
@@ -209,31 +204,32 @@ def sql_import_posts
     # Remove new lines and replace with a space
     # topic_title = topic_title.gsub( /\n/m, " " )
     
-    # are we creating a new topic?
-    is_new_topic = false
-
-    # TODO this needs a list of topics on target forum to recover from partial import.
-    topic = @topics[phpbb_post['topic_id']]
-    if topic.nil?
-      is_new_topic = true
-      print "new topic".blue + is_new_topic.to_s
+    # if there is a discourse id in the post field then that means it has already been imported.
+    if phpbb_post['discourse_id'] != 0 then
+      puts "[".green + phpbb_post['post_id'].to_s.green + "] skipped, id ".green + phpbb_post['discourse_id'].to_s.green
+      next
     end
-    
-    # some progress
-    progress = @post_count.percent_of(@phpbb_posts.count).round.to_s
+
+    # are we creating a new topic?    
+    topics = @sql.query "SELECT discourse_id
+                          FROM phpbb_topics
+                          WHERE topic_id = #{phpbb_post['topic_id']}"
+
+    is_new_topic = topics.first['discourse_id'] == 0 || topics.first.nil?
     
     text = sanitize_text phpbb_post['post_text']
     
     # create!
     post_creator = nil
     if is_new_topic
-      print "\n[#{progress}%] Creating topic ".yellow + topic_title +
+      print "\nCreating topic ".yellow + topic_title +
         " (#{Time.at(phpbb_post['post_time'])}) in category ".yellow +
         "#{category.name}"
       post_creator = PostCreator.new(
         dc_user,
+        skip_validations: true,
         raw: text,
-        title: topic_title,
+        title: sanitize_topic(topic_title),
         archetype: 'regular',
         category: category.name,
         created_at: Time.at(phpbb_post['post_time']),
@@ -242,12 +238,13 @@ def sql_import_posts
       # for a new topic: also clear mail deliveries
       ActionMailer::Base.deliveries = []
     else
-      print ".".yellow
+      print "using topic #".yellow + topics.first['discourse_id'].to_s.yellow
       $stdout.flush
       post_creator = PostCreator.new(
         dc_user,
+        skip_validations: true,
         raw: text,
-        topic_id: topic,
+        topic_id: topics.first['discourse_id'],
         created_at: Time.at(phpbb_post['post_time']),
         updated_at: Time.at(phpbb_post['post_edit_time']))
     end
@@ -269,7 +266,19 @@ def sql_import_posts
       post_serializer = PostSerializer.new(post, scope: true, root: false)
       post_serializer.topic_slug = post.topic.slug if post.topic.present?
       post_serializer.draft_sequence = DraftSequence.current(dc_user, post.topic.draft_key)
-      #save id to hash
+
+      #save ids to database
+
+      if is_new_topic then
+        discourse_topicid_noted = @sql.query "UPDATE phpbb_topics
+          SET discourse_id = #{post.topic_id}
+          WHERE topic_id = '#{phpbb_post['topic_id']}'" 
+      end
+
+      discourse_postid_noted = @sql.query "UPDATE phpbb_posts
+        SET discourse_id = #{post.id}
+        WHERE post_id = '#{phpbb_post['post_id']}'"
+
       @topics[phpbb_post['topic_id']] = post.topic.id if is_new_topic
       puts "\nTopic #{phpbb_post['post_id']} created".green if is_new_topic
     end
@@ -476,6 +485,7 @@ def dc_set_temporary_site_settings
   SiteSetting.send("traditional_markdown_linebreaks=", MARKDOWN_LINEBREAKS)
 
   SiteSetting.send("unique_posts_mins=", 0)
+  SiteSetting.send("flag_sockpuppets=", 0)
   SiteSetting.send("rate_limit_create_topic=", 0)
   SiteSetting.send("rate_limit_create_post=", 0)
   SiteSetting.send("max_topics_per_day=", 10000)
