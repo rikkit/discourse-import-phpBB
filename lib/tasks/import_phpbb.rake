@@ -373,11 +373,11 @@ def sanitize_text(text)
 
   # completely remove youtube, soundcloud and url tags as those links are oneboxed
   # color is not supported
-  text.gsub! /\[(youtube|soundcloud|url|img|color)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
+  text.gsub! /\[(youtubefull|soundcloud|url|img|color)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
 
   # yt tags are custom for our forum
   text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
-  text.gsub! /\[youtubefull\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
+  text.gsub! /\[youtube\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
 
   # convert newlines to markdown syntax
   text.gsub! /([^\n])\n/, '\1  '+"\n" if MARKDOWN_LINEBREAKS
