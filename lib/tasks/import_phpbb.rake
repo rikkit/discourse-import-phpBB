@@ -27,6 +27,7 @@
 ############################################################
 
 require 'mysql2'
+require 'ruby-bbcode-to-md'
 
 desc "Import posts and comments from a phpBB Forum"
 task "import:phpbb" => 'environment' do
@@ -118,7 +119,6 @@ end
 
 def sql_fetch_posts(*parse)
   @post_count = @offset = 0
-  @topics = {}
   @phpbb_posts ||= [] # Initialize
 
   # Fetch Facebook posts in batches and download writer/user info
@@ -134,6 +134,7 @@ def sql_fetch_posts(*parse)
       JOIN phpbb_topics t ON t.topic_id=p.topic_id
       JOIN phpbb_users u ON u.user_id=p.poster_id
       JOIN phpbb_forums f ON t.forum_id=f.forum_id
+      WHERE p.discourse_id = '0'
       ORDER BY topic_id ASC, topic_title ASC, post_id ASC
       LIMIT #{@offset.to_s},500;"
     puts query.yellow if @offset == 0
@@ -279,7 +280,6 @@ def sql_import_posts
         SET discourse_id = #{post.id}
         WHERE post_id = '#{phpbb_post['post_id']}'"
 
-      @topics[phpbb_post['topic_id']] = post.topic.id if is_new_topic
       puts "\nTopic #{phpbb_post['post_id']} created".green if is_new_topic
     end
 
@@ -359,6 +359,11 @@ end
 def sanitize_text(text)
   text = CGI.unescapeHTML(text)
 
+  # -- Pre process the text
+
+  # remove tag IDs
+  text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
+
   # screaming
   unless seems_quiet?(text)
     text = '<capslock> ' + text.downcase
@@ -368,31 +373,15 @@ def sanitize_text(text)
     text = "<symbols>\n" + text
   end
 
-  # remove tag IDs
-  text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
+  # replace smilies
+  text.gsub! /<\s*img .*?al­t\s*=\s*([­"'])(.*?)\­1.*?>/i, ' (\2)­ '
 
-  # completely remove youtube, soundcloud and url tags as those links are oneboxed
-  # color is not supported
-  text.gsub! /\[(youtubefull|soundcloud|url|img|color)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
-
-  # yt tags are custom for our forum
-  text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
-  text.gsub! /\[youtube\]([a-zA-Z0-9_-]{11})\[\/yt\]/, ' http://youtu.be/\1 '
-
-  # convert newlines to markdown syntax
-  text.gsub! /([^\n])\n/, '\1  '+"\n" if MARKDOWN_LINEBREAKS
-  
-  # edit invalid quotes
-  text.gsub! /\[quote\]/, '[quote=""]'
-  
-  # strange links (maybe soundcloud)
-  # <!-- m --><a class="postlink" href="http://link">http://link</a><!-- m -->
-  text.gsub! /<!-- m --><a class="postlink" href="(.*?)">.*?<\/a><!-- m -->/m, ' \1 '
-
-  # convert code blocks to markdown syntax
-  text.gsub! /\[code\](.*?)\[\/code\]/m do |match|
-    "\n    " + $1.gsub(/(  )?\n(.)/, "\n"+'    \2') + "\n"
-  end
+  # add any tag aliases here
+  text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, '[youtube]\1[/youtube]' 
+  text.gsub! /\[youtubefull\]([a-zA-Z0-9_-]{11})\[\/youtubefull\]/, '[youtube]\1[/youtube]'
+  text.gsub! /\[spoiler=\]([a-zA-Z0-9_-]{11})\[\/spoiler\]/, '[spoiler]\1[/spoiler]' 
+  text.gsub! /\[spoiler=([a-zA-Z0-9_-]{11})\]([a-zA-Z0-9_-]{11})\[\/spoiler\]/, '[spoiler]\1[/spoiler]'
+  text.gsub! /\[inlinespoiler=\]([a-zA-Z0-9_-]{11})\[\/inlinespoiler\]/, '[spoiler]\1[/spoiler]' 
 
   # size tags
   # discourse likes numbers from 4-40 (pt), phpbb uses 20 to 200 (percent)
@@ -403,6 +392,20 @@ def sanitize_text(text)
     pt = 4 if pt < 4
 
     "[size=#{pt}]"
+  end
+
+  # -- Now use ruby-bbcode-to-md gem
+  text.bbcode_to_md!
+
+  # -- Post processing..
+
+  # bbcode->md gem assumes single newline md
+  # convert newlines to markdown syntax
+  text.gsub! /([^\n])\n/, '\1  '+"\n" if MARKDOWN_LINEBREAKS
+    
+  # convert code blocks to markdown syntax
+  text.gsub! /\[code\](.*?)\[\/code\]/m do |match|
+    "\n    " + $1.gsub(/(  )?\n(.)/, "\n"+'    \2') + "\n"
   end
 
   text
@@ -461,6 +464,10 @@ def dc_restore_site_settings
   #  config.action_mailer.delivery_method = s['method']
   #  config.action_mailer.raise_delivery_errors = s['errors']
   #end
+
+
+  RateLimiter.enable
+
   SiteSetting.send("unique_posts_mins=", s['unique_posts_mins'])
   SiteSetting.send("rate_limit_create_topic=", s['rate_limit_create_topic'])
   SiteSetting.send("rate_limit_create_post=", s['rate_limit_create_post'])
@@ -483,6 +490,8 @@ end
 def dc_set_temporary_site_settings
   # don't backup this first one
   SiteSetting.send("traditional_markdown_linebreaks=", MARKDOWN_LINEBREAKS)
+
+  RateLimiter.disable
 
   SiteSetting.send("unique_posts_mins=", 0)
   SiteSetting.send("flag_sockpuppets=", 0)
