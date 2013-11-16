@@ -7,7 +7,7 @@ repository to anyone who sends useful and sane pull requests. For more details a
 
 # What is this?
 
-This rake task will import all threads and posts of a phpBB Forum into Discourse.
+This rake task will import all threads and posts of a phpBB3 Forum into Discourse.
 
 * post dates and authors are preserved
 * user accounts are created from phpBB users, they have no login capability,
@@ -46,28 +46,26 @@ Use at your own risk! Please test on a dummy Discourse install first.
 
   ```Gemfile
   gem 'mysql2', require: false
+  gem 'ruby-bbcode-to-md', require: false
   ```
 
 * Install header files for mysql, ex. on Debian: `sudo apt-get install libmysqlclient-dev`
-
-* Install gem: `gem install mysql2`
-
+* Install gems: `gem install mysql2` and `gem install ruby-bbcode-to-md`
 * Edit `config/import_phpbb.yml`: insert database connection and discourse_admin username
-
 * Place `config/import_phpbb.yml` in your `discourse/config` folder
-
 * Place `lib/tasks/import_phpbb.rake` in your `discourse/lib/tasks` folder
-
 * In case of multisite prepend next command with: `export RAILS_DB=<your database>`
-
-* Run `rake import:phpbb`
-
+* Now you need to add two columns to your PHPbb table. In the mysql console, run:
+```mysql
+ALTER TABLE phpbb_topics ADD COLUMN discourse_id INT NOT NULL DEFAULT '0';
+ALTER TABLE phpbb_posts ADD COLUMN discourse_id INT NOT NULL DEFAULT '0';
+```
+* Finally, run `rake import:phpbb`
 * If everything worked, reset your config and tell your people to reset their password on the new site.
 
 # ToDo
 
-* Implement more sanitization
-* Detect previously imported posts so migration can be done incrementally
+* Add required tables automatically in the script
 
 # Notes
 
