@@ -360,10 +360,6 @@ def sanitize_text(text)
   text = CGI.unescapeHTML(text)
 
   # -- Pre process the text
-
-  # remove tag IDs
-  text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
-
   # screaming
   unless seems_quiet?(text)
     text = '<capslock> ' + text.downcase
@@ -374,14 +370,22 @@ def sanitize_text(text)
   end
 
   # replace smilies
-  text.gsub! /<\s*img .*?al­t\s*=\s*([­"'])(.*?)\­1.*?>/i, ' (\2)­ '
+  text.gsub! /<!--.*--><img src=".*" alt="(.*)" title=".*" \/><!--.*-->/i, ' \1 '
+
+  # remove tag IDs
+  text.gsub! /\[(\/?[a-zA-Z]+(=("[^"]*?"|[^\]]*?))?):[a-z0-9]+\]/, '[\1]'
+
+  # completely remove youtube, soundcloud and url tags as those links are oneboxed
+  # color is not supported
+  text.gsub! /\[(youtube|soundcloud|url|img|color|str)\](.*?)\[\/\1\]/m, "\n"+'\2'+"\n"
+
+  # yt tags are custom for our forum
+  text.gsub! /\[yt\]([a-zA-Z0-9_-]*)\[\/yt\]/i, ' http://youtu.be/\1 '
+  text.gsub! /\[youtubefull\](.*)\[\/youtubefull\]/i, ' http://youtu.be/\1 '
 
   # add any tag aliases here
-  text.gsub! /\[yt\]([a-zA-Z0-9_-]{11})\[\/yt\]/, '[youtube]\1[/youtube]' 
-  text.gsub! /\[youtubefull\]([a-zA-Z0-9_-]{11})\[\/youtubefull\]/, '[youtube]\1[/youtube]'
-  text.gsub! /\[spoiler=\]([a-zA-Z0-9_-]{11})\[\/spoiler\]/, '[spoiler]\1[/spoiler]' 
-  text.gsub! /\[spoiler=([a-zA-Z0-9_-]{11})\]([a-zA-Z0-9_-]{11})\[\/spoiler\]/, '[spoiler]\1[/spoiler]'
-  text.gsub! /\[inlinespoiler=\]([a-zA-Z0-9_-]{11})\[\/inlinespoiler\]/, '[spoiler]\1[/spoiler]' 
+  text.gsub! /\[spoiler(.*)\](.*)\[\/spoiler\]/i, '[spoiler]\2[/spoiler]'
+  text.gsub! /\[inlinespoiler\](.*)\[\/inlinespoiler\]/i, '[spoiler]\1[/spoiler]'
 
   # size tags
   # discourse likes numbers from 4-40 (pt), phpbb uses 20 to 200 (percent)
@@ -394,8 +398,10 @@ def sanitize_text(text)
     "[size=#{pt}]"
   end
 
+  RubyBBCode.disable_validation
+  
   # -- Now use ruby-bbcode-to-md gem
-  text.bbcode_to_md!
+  text.bbcode_to_md!(false)
 
   # -- Post processing..
 
