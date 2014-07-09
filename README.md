@@ -1,6 +1,16 @@
+# [Obsolete]
+
+The purpose of this repo was to import posts and users from phpBB forums into Discourse. This task is now better done using [the official solution from the Discourse team themselves](https://meta.discourse.org/t/phpbb-3-importer/17397).
+
+This repo will stay up for posterity; the original readme is kept intact below.
+
+@rikkit
+
+---
+
 # Note
 
-I don't have the time to work on this actively anymore. Since Discourse is still in early beta,
+I (@cfstras) don't have the time to work on this actively anymore. Since Discourse is still in early beta,
 this importer might not even work anymore. If you want to take over the project, I'll give up this
 repository to anyone who sends useful and sane pull requests. For more details and discussion, see
 [this thread on Discourse Meta](http://meta.discourse.org/t/importing-phpbb-into-discourse/7956).
